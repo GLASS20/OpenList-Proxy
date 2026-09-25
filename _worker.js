@@ -221,7 +221,8 @@ let randomIP = randomSoftBankIP();
 request.headers.set("X-Forwarded-For", randomIP);
 request.headers.set("X-Real-IP", randomIP);
 
-  // DEBUG: 返回准备发往上游的 Header
+// DEBUG: 返回准备发往上游的 Header
+/*
 const debugHeaders = Object.fromEntries(request.headers.entries());
 
 return new Response(
@@ -242,7 +243,7 @@ return new Response(
     },
   }
 );
-
+*/
   
   let response = await fetch(request);
   while (response.status >= 300 && response.status < 400) {
