@@ -14,6 +14,8 @@ function initConstants(env) {
   // Cloudflare Worker 的完整地址
   // Full address of your Cloudflare Worker
   WORKER_ADDRESS = env.WORKER_ADDRESS || "YOUR_WORKER_ADDRESS";
+  // 自定义API绕过Token
+  X_OpenList_Token = env.X_OpenList_Token || "YOUR_X_OpenList_Token";
   // 是否禁用签名验证 (推荐设置为 false)
   // Whether to disable signature verification (recommended to set as false)
   // 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
@@ -169,6 +171,7 @@ async function handleDownload(request) {
     headers: {
       "content-type": "application/json;charset=UTF-8",
       Authorization: TOKEN,
+      "X-OpenList-Token": X_OpenList_Token
     },
     body: JSON.stringify({
       path,
