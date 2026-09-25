@@ -87,7 +87,7 @@ var verify = async (data, _sign) => {
 
   const signSlice = _sign.split(":");
   if (!signSlice[signSlice.length - 1]) {
-    return "expire missing " + WORKER_ADDRESS;
+    return "expire missing";
   }
   const expire = parseInt(signSlice[signSlice.length - 1]);
   if (isNaN(expire)) {
