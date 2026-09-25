@@ -14,7 +14,7 @@ function initConstants(env) {
   // Cloudflare Worker 的完整地址
   // Full address of your Cloudflare Worker
   WORKER_ADDRESS = env.WORKER_ADDRESS || "YOUR_WORKER_ADDRESS";
-  // 自定义API绕过Token
+  // 自定义X_OPENLIST_TOKEN绕过Challenge
   X_OPENLIST_TOKEN = env.X_OPENLIST_TOKEN || "YOUR_X_OPENLIST_TOKEN";
   // 是否禁用签名验证 (推荐设置为 false)
   // Whether to disable signature verification (recommended to set as false)
