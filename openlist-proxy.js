@@ -22,6 +22,51 @@ function initConstants(env) {
     env.DISABLE_SIGN === "true" || env.DISABLE_SIGN === true || false;
 }
 
+const prefixes = [
+  "117.46.4.0/23",
+  "117.46.4.0/22",
+  "117.46.6.0/23",
+  "117.46.8.0/22",
+  "117.46.8.0/23",
+  "117.46.10.0/23",
+  "117.46.12.0/23",
+  "117.46.12.0/22",
+  "117.46.14.0/23",
+  "117.46.16.0/22",
+  "117.46.16.0/23",
+  "117.46.18.0/23"
+];
+
+function randomIPv4FromCIDR(cidr) {
+  const [ip, prefix] = cidr.split("/");
+  const parts = ip.split(".").map(Number);
+
+  const ipNum =
+    ((parts[0] << 24) >>> 0) |
+    (parts[1] << 16) |
+    (parts[2] << 8) |
+    parts[3];
+
+  const hostBits = 32 - Number(prefix);
+  const size = 2 ** hostBits;
+
+  // 排除 network 和 broadcast
+  const offset = Math.floor(Math.random() * (size - 2)) + 1;
+  const result = (ipNum + offset) >>> 0;
+
+  return [
+    result >>> 24,
+    (result >>> 16) & 255,
+    (result >>> 8) & 255,
+    result & 255
+  ].join(".");
+}
+
+function randomSoftBankIP() {
+  const cidr = prefixes[Math.floor(Math.random() * prefixes.length)];
+  return randomIPv4FromCIDR(cidr);
+}
+
 // Privacy Warning: Disabling signature allows files to be accessed by anyone who knows the path.
 // 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
 
@@ -141,6 +186,11 @@ async function handleDownload(request) {
       }
     }
   }
+
+  let randomIP = randomSoftBankIP();
+  request.headers.set("X-Forwarded-For", randomIP);
+  request.headers.set("X-Real-IP", randomIP);
+  
   let response = await fetch(request);
   while (response.status >= 300 && response.status < 400) {
     const location = response.headers.get("Location");
