@@ -24,9 +24,6 @@ function initConstants(env) {
     env.DISABLE_SIGN === "true" || env.DISABLE_SIGN === true || false;
 }
 
-// Privacy Warning: Disabling signature allows files to be accessed by anyone who knows the path.
-// 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
-
 // src/verify.js
 /**
  * Verifies a signed string with expiration check.
