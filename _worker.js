@@ -98,7 +98,7 @@ var verify = async (data, _sign) => {
   }
   const right = await hmacSha256Sign(data, expire);
   if (_sign !== right) {
-    return "sign mismatch";
+    return "sign mismatch " + WORKER_ADDRESS;
   }
   return "";
 };
