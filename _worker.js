@@ -87,7 +87,7 @@ var verify = async (data, _sign) => {
 
   const signSlice = _sign.split(":");
   if (!signSlice[signSlice.length - 1]) {
-    return "expire missing";
+    return "expire missing " + WORKER_ADDRESS;
   }
   const expire = parseInt(signSlice[signSlice.length - 1]);
   if (isNaN(expire)) {
@@ -98,7 +98,7 @@ var verify = async (data, _sign) => {
   }
   const right = await hmacSha256Sign(data, expire);
   if (_sign !== right) {
-    return "sign mismatch " + WORKER_ADDRESS;
+    return "sign mismatch";
   }
   return "";
 };
