@@ -24,51 +24,6 @@ function initConstants(env) {
     env.DISABLE_SIGN === "true" || env.DISABLE_SIGN === true || false;
 }
 
-const prefixes = [
-  "117.46.4.0/23",
-  "117.46.4.0/22",
-  "117.46.6.0/23",
-  "117.46.8.0/22",
-  "117.46.8.0/23",
-  "117.46.10.0/23",
-  "117.46.12.0/23",
-  "117.46.12.0/22",
-  "117.46.14.0/23",
-  "117.46.16.0/22",
-  "117.46.16.0/23",
-  "117.46.18.0/23"
-];
-
-function randomIPv4FromCIDR(cidr) {
-  const [ip, prefix] = cidr.split("/");
-  const parts = ip.split(".").map(Number);
-
-  const ipNum =
-    ((parts[0] << 24) >>> 0) |
-    (parts[1] << 16) |
-    (parts[2] << 8) |
-    parts[3];
-
-  const hostBits = 32 - Number(prefix);
-  const size = 2 ** hostBits;
-
-  // 排除 network 和 broadcast
-  const offset = Math.floor(Math.random() * (size - 2)) + 1;
-  const result = (ipNum + offset) >>> 0;
-
-  return [
-    result >>> 24,
-    (result >>> 16) & 255,
-    (result >>> 8) & 255,
-    result & 255
-  ].join(".");
-}
-
-function randomSoftBankIP() {
-  const cidr = prefixes[Math.floor(Math.random() * prefixes.length)];
-  return randomIPv4FromCIDR(cidr);
-}
-
 // Privacy Warning: Disabling signature allows files to be accessed by anyone who knows the path.
 // 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
 
@@ -181,7 +136,63 @@ async function handleDownload(request) {
   if (res.code !== 200) {
     return new Response(JSON.stringify(res));
   }
-  request = new Request(res.data.url, request);
+  const upstreamHeaders = new Headers();
+
+  // 只取 OpenList 明确要求的 Header
+  if (res.data.header) {
+    for (const [key, values] of Object.entries(res.data.header)) {
+      const name = key.toLowerCase();
+  
+      // 这些全部不从上游响应中接受/传递
+      if (
+        name === "x-forwarded-for" ||
+        name === "x-real-ip" ||
+        name === "forwarded" ||
+        name === "fastly-client-ip" ||
+        name === "fastly-client" ||
+        name === "fastly-ff" ||
+        name === "fastly-ssl" ||
+        name === "cdn-loop" ||
+        name === "x-forwarded-host" ||
+        name === "x-forwarded-server" ||
+        name === "x-forwarded-proto" ||
+        name === "x-forwarded-port" ||
+        name === "true-client-ip" ||
+        name === "cf-connecting-ip" ||
+        name === "cf-connecting-ipv6" ||
+        name === "cf-ray" ||
+        name === "cf-visitor" ||
+        name === "cf-worker" ||
+        name === "via"
+      ) {
+        continue;
+      }
+  
+      for (const value of values) {
+        upstreamHeaders.append(key, value);
+      }
+    }
+  }
+  
+  // 客户端只允许这些真正与文件请求有关的 Header
+  for (const name of [
+    "range",
+    "if-range",
+    "if-none-match",
+    "if-modified-since"
+  ]) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      upstreamHeaders.set(name, value);
+    }
+  }
+  
+  request = new Request(res.data.url, {
+    method: request.method === "HEAD" ? "HEAD" : "GET",
+    headers: upstreamHeaders,
+    redirect: "manual"
+  });
+  
   if (res.data.header) {
     for (const k in res.data.header) {
       for (const v of res.data.header[k]) {
@@ -189,10 +200,6 @@ async function handleDownload(request) {
       }
     }
   }
-
-  let randomIP = randomSoftBankIP();
-  request.headers.set("X-Forwarded-For", randomIP);
-  request.headers.set("X-Real-IP", randomIP);
   
   let response = await fetch(request);
   while (response.status >= 300 && response.status < 400) {
