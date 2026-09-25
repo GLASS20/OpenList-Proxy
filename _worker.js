@@ -1,6 +1,7 @@
 // src/const.js
 // Environment variables will be injected by Cloudflare Worker runtime
 // These will be set during the fetch function execution
+
 let ADDRESS, TOKEN, WORKER_ADDRESS, DISABLE_SIGN, X_OPENLIST_TOKEN;
 
 // Function to initialize constants from environment variables
@@ -8,115 +9,211 @@ function initConstants(env) {
   // OpenList 后端服务器地址 (不要包含尾随斜杠)
   // OpenList backend server address (do not include trailing slash)
   ADDRESS = env.ADDRESS || "YOUR_ADDRESS";
+
   // OpenList 服务器的 API 访问令牌 (密钥)
   // API access token (secret key) for OpenList server
   TOKEN = env.TOKEN || "YOUR_TOKEN";
+
   // Cloudflare Worker 的完整地址
   // Full address of your Cloudflare Worker
   WORKER_ADDRESS = env.WORKER_ADDRESS || "YOUR_WORKER_ADDRESS";
-  // 自定义X_OPENLIST_TOKEN绕过Challenge
+
+  // 自定义 X_OPENLIST_TOKEN 绕过 Challenge
   X_OPENLIST_TOKEN = env.X_OPENLIST_TOKEN || "YOUR_X_OPENLIST_TOKEN";
-  // 是否禁用签名验证 (推荐设置为 false)
-  // Whether to disable signature verification (recommended to set as false)
-  // 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
-  // Privacy Warning: Disabling signature allows files to be accessed by anyone who knows the path.
+
+  // 是否禁用签名验证
+  // Whether to disable signature verification
   DISABLE_SIGN =
-    env.DISABLE_SIGN === "true" || env.DISABLE_SIGN === true || false;
+    env.DISABLE_SIGN === "true" ||
+    env.DISABLE_SIGN === true ||
+    false;
 }
 
-const prefixes = [
-  "117.46.4.0/23",
-  "117.46.4.0/22",
-  "117.46.6.0/23",
-  "117.46.8.0/22",
-  "117.46.8.0/23",
-  "117.46.10.0/23",
-  "117.46.12.0/23",
-  "117.46.12.0/22",
-  "117.46.14.0/23",
-  "117.46.16.0/22",
-  "117.46.16.0/23",
-  "117.46.18.0/23"
-];
 
-function randomIPv4FromCIDR(cidr) {
-  const [ip, prefix] = cidr.split("/");
-  const parts = ip.split(".").map(Number);
+// ------------------------------------------------------------
+// 允许从客户端继承的最小 Header
+//
+// 这些 Header 用于文件下载/断点续传，不包含客户端身份特征。
+// ------------------------------------------------------------
 
-  const ipNum =
-    ((parts[0] << 24) >>> 0) |
-    (parts[1] << 16) |
-    (parts[2] << 8) |
-    parts[3];
+const ALLOWED_CLIENT_HEADERS = new Set([
+  "range",
+  "if-range",
+  "if-none-match",
+  "if-modified-since",
+]);
 
-  const hostBits = 32 - Number(prefix);
-  const size = 2 ** hostBits;
 
-  // 排除 network 和 broadcast
-  const offset = Math.floor(Math.random() * (size - 2)) + 1;
-  const result = (ipNum + offset) >>> 0;
+// ------------------------------------------------------------
+// OpenList 返回的、允许发送给最终文件服务器的 Header
+//
+// 这些 Header 来自 OpenList，而不是直接继承客户端。
+// ------------------------------------------------------------
 
-  return [
-    result >>> 24,
-    (result >>> 16) & 255,
-    (result >>> 8) & 255,
-    result & 255
-  ].join(".");
-}
+const ALLOWED_OPENLIST_HEADERS = new Set([
+  // 下载认证/授权
+  "authorization",
+  "cookie",
 
-function randomSoftBankIP() {
-  const cidr = prefixes[Math.floor(Math.random() * prefixes.length)];
-  return randomIPv4FromCIDR(cidr);
-}
+  // 某些文件服务器需要 Referer / User-Agent
+  // 如果 OpenList 没有返回，它们不会被主动添加。
+  "referer",
+  "user-agent",
 
-// Privacy Warning: Disabling signature allows files to be accessed by anyone who knows the path.
-// 隐私警告：关闭签名会造成文件可被任何知晓路径的人获取
+  // 文件下载控制
+  "range",
+  "if-range",
+  "if-none-match",
+  "if-modified-since",
+]);
+
+
+// ------------------------------------------------------------
+// OpenList Header 额外禁止项
+//
+// 即使未来 ALLOWED_OPENLIST_HEADERS 扩展，也禁止这些代理/CDN特征。
+// ------------------------------------------------------------
+
+const BLOCKED_UPSTREAM_HEADERS = new Set([
+  // IP / Proxy
+  "x-forwarded-for",
+  "x-real-ip",
+  "forwarded",
+  "forwarded-for",
+  "true-client-ip",
+  "x-client-ip",
+
+  // Fastly
+  "fastly-client",
+  "fastly-client-ip",
+  "fastly-ff",
+  "fastly-ssl",
+  "fastly-orig-accept-encoding",
+  "fastly-original-cookie",
+  "fastly-original-url",
+  "fastly-vary-string",
+  "fastly-temp-xff",
+  "fastly-debug-path",
+  "fastly-debug-ttl",
+  "fastly-debug-digest",
+
+  // Forwarding
+  "x-forwarded-host",
+  "x-forwarded-server",
+  "x-forwarded-proto",
+  "x-forwarded-port",
+
+  // Cloudflare
+  "cf-connecting-ip",
+  "cf-connecting-ipv6",
+  "cf-ray",
+  "cf-ipcountry",
+  "cf-visitor",
+  "cf-worker",
+  "cf-ew-via",
+  "cf-pseudo-ipv4",
+
+  // CDN / Proxy
+  "cdn-loop",
+  "via",
+
+  // Varnish / Fastly internal
+  "x-varnish",
+  "x-timer",
+
+  // Browser fingerprint
+  "sec-ch-ua",
+  "sec-ch-ua-mobile",
+  "sec-ch-ua-platform",
+  "sec-fetch-dest",
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "sec-fetch-user",
+  "upgrade-insecure-requests",
+
+  // Browser environment information
+  "accept-language",
+  "origin",
+
+  // Connection / proxy
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+
+  // Cache fingerprint
+  "cache-control",
+
+  // 不允许 Host 由 Header 注入
+  "host",
+]);
+
+
+// ------------------------------------------------------------
+// Privacy Warning:
+//
+// 禁用签名会导致任何知道路径的人都可能访问文件。
+// ------------------------------------------------------------
+
 
 // src/verify.js
+
 /**
  * Verifies a signed string with expiration check.
+ *
  * @param {string} data - Original data.
  * @param {string} _sign - Signed string.
  * @returns {Promise<string>} Error message if invalid, empty string if valid.
  */
 var verify = async (data, _sign) => {
-  // If signature verification is disabled, return pass directly
   if (DISABLE_SIGN) {
     return "";
   }
 
   const signSlice = _sign.split(":");
+
   if (!signSlice[signSlice.length - 1]) {
     return "expire missing";
   }
+
   const expire = parseInt(signSlice[signSlice.length - 1]);
+
   if (isNaN(expire)) {
     return "expire invalid";
   }
+
   if (expire < Date.now() / 1e3 && expire > 0) {
     return "expire expired";
   }
+
   const right = await hmacSha256Sign(data, expire);
+
   if (_sign !== right) {
     return "sign mismatch";
   }
+
   return "";
 };
 
+
 /**
  * Generates an HMAC-SHA256 signature with expiration.
+ *
  * @param {string} data - The data to sign.
- * @param {number} expire - Expiry timestamp (in seconds).
+ * @param {number} expire - Expiry timestamp in seconds.
  * @returns {Promise<string>} The signed string.
  */
 var hmacSha256Sign = async (data, expire) => {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(TOKEN),
-    { name: "HMAC", hash: "SHA-256" },
+    {
+      name: "HMAC",
+      hash: "SHA-256",
+    },
     false,
     ["sign", "verify"]
   );
+
   const buf = await crypto.subtle.sign(
     {
       name: "HMAC",
@@ -125,6 +222,7 @@ var hmacSha256Sign = async (data, expire) => {
     key,
     new TextEncoder().encode(`${data}:${expire}`)
   );
+
   return (
     btoa(String.fromCharCode(...new Uint8Array(buf)))
       .replace(/\+/g, "-")
@@ -134,117 +232,283 @@ var hmacSha256Sign = async (data, expire) => {
   );
 };
 
+
+// ------------------------------------------------------------
+// 创建“干净”的上游 Header
+// ------------------------------------------------------------
+
+function buildUpstreamHeaders(clientRequest, openListHeader) {
+  const headers = new Headers();
+
+  // ----------------------------------------------------------
+  // 1. 只从客户端继承下载控制 Header
+  // ----------------------------------------------------------
+
+  for (const name of ALLOWED_CLIENT_HEADERS) {
+    const value = clientRequest.headers.get(name);
+
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+
+
+  // ----------------------------------------------------------
+  // 2. OpenList 返回的 Header
+  //
+  // 只接受明确允许的 Header。
+  // Fastly / Cloudflare / Proxy / Browser 特征全部拒绝。
+  // ----------------------------------------------------------
+
+  if (openListHeader && typeof openListHeader === "object") {
+    for (const [key, values] of Object.entries(openListHeader)) {
+      const lowerKey = key.toLowerCase();
+
+      // 绝对禁止
+      if (BLOCKED_UPSTREAM_HEADERS.has(lowerKey)) {
+        continue;
+      }
+
+      // 不在 OpenList 白名单中
+      if (!ALLOWED_OPENLIST_HEADERS.has(lowerKey)) {
+        continue;
+      }
+
+      if (Array.isArray(values)) {
+        // 对同一个 Header，使用 set 而不是 append，
+        // 避免构造多余 Header 值。
+        if (values.length > 0) {
+          headers.set(lowerKey, String(values[0]));
+        }
+      } else if (values !== undefined && values !== null) {
+        headers.set(lowerKey, String(values));
+      }
+    }
+  }
+
+  return headers;
+}
+
+
+// ------------------------------------------------------------
 // src/handleDownload.js
+// ------------------------------------------------------------
+
 /**
  * Handles download requests with signature verification and CORS.
- * @param {Request} request - The incoming fetch request.
- * @returns {Promise<Response>} A proper file or error response.
+ *
+ * @param {Request} request - Incoming request.
+ * @returns {Promise<Response>}
  */
 async function handleDownload(request) {
   const origin = request.headers.get("origin") ?? "*";
+
   const url = new URL(request.url);
   const path = decodeURIComponent(url.pathname);
 
-  // If signature verification is not disabled, perform signature verification
+
+  // ----------------------------------------------------------
+  // Signature verification
+  // ----------------------------------------------------------
+
   if (!DISABLE_SIGN) {
     const sign = url.searchParams.get("sign") ?? "";
+
     const verifyResult = await verify(path, sign);
+
     if (verifyResult !== "") {
-      const resp2 = new Response(
+      return new Response(
         JSON.stringify({
           code: 401,
           message: verifyResult,
         }),
         {
+          status: 401,
           headers: {
             "content-type": "application/json;charset=UTF-8",
             "Access-Control-Allow-Origin": origin,
           },
         }
       );
-      return resp2;
     }
   }
 
-  let resp = await fetch(`${ADDRESS}/api/fs/link`, {
+
+  // ----------------------------------------------------------
+  // 请求 OpenList 获取真实文件 URL
+  // ----------------------------------------------------------
+
+  const resp = await fetch(`${ADDRESS}/api/fs/link`, {
     method: "POST",
+
     headers: {
       "content-type": "application/json;charset=UTF-8",
       Authorization: TOKEN,
-      "X-OpenList-Token": X_OPENLIST_TOKEN
+      "X-OpenList-Token": X_OPENLIST_TOKEN,
     },
+
     body: JSON.stringify({
       path,
     }),
   });
-  let res = await resp.json();
+
+  const res = await resp.json();
+
   if (res.code !== 200) {
-    return new Response(JSON.stringify(res));
-  }
-  request = new Request(res.data.url, request);
-  if (res.data.header) {
-    for (const k in res.data.header) {
-      for (const v of res.data.header[k]) {
-        request.headers.set(k, v);
-      }
-    }
+    return new Response(JSON.stringify(res), {
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+        "Access-Control-Allow-Origin": origin,
+      },
+    });
   }
 
-  let randomIP = randomSoftBankIP();
-  request.headers.set("X-Forwarded-For", randomIP);
-  request.headers.set("X-Real-IP", randomIP);
 
-  // DEBUG: 返回准备发往上游的 Header
-const debugHeaders = Object.fromEntries(request.headers.entries());
+  // ----------------------------------------------------------
+  // 创建完全独立的上游请求
+  //
+  // 关键：
+  //
+  // ❌ 不再：
+  //    new Request(res.data.url, request)
+  //
+  // ✅ 而是：
+  //    重新构造 Header
+  //
+  // 因此 Fastly → Worker 的 Header 不会被整体继承。
+  // ----------------------------------------------------------
 
-return new Response(
-  JSON.stringify(
+  const upstreamHeaders = buildUpstreamHeaders(
+    request,
+    res.data.header
+  );
+
+
+  // ----------------------------------------------------------
+  // 创建真正发送给文件服务器的 Request
+  // ----------------------------------------------------------
+
+  let upstreamRequest = new Request(
+    res.data.url,
     {
-      url: request.url,
-      method: request.method,
-      headers: debugHeaders,
-    },
-    null,
-    2
-  ),
-  {
-    status: 200,
-    headers: {
-      "content-type": "application/json; charset=UTF-8",
-      "Access-Control-Allow-Origin": "*",
-    },
-  }
-);
+      method:
+        request.method === "HEAD"
+          ? "HEAD"
+          : "GET",
 
-  
-  let response = await fetch(request);
-  while (response.status >= 300 && response.status < 400) {
+      headers: upstreamHeaders,
+
+      redirect: "manual",
+    }
+  );
+
+
+  // ----------------------------------------------------------
+  // 请求文件服务器
+  // ----------------------------------------------------------
+
+  let response = await fetch(upstreamRequest);
+
+
+  // ----------------------------------------------------------
+  // 处理重定向
+  // ----------------------------------------------------------
+
+  while (
+    response.status >= 300 &&
+    response.status < 400
+  ) {
     const location = response.headers.get("Location");
-    if (location) {
-      if (location.startsWith(`${WORKER_ADDRESS}/`)) {
-        request = new Request(location, request);
-        return await handleRequest(request);
-      } else {
-        request = new Request(location, request);
-        response = await fetch(request);
-      }
-    } else {
+
+    if (!location) {
       break;
     }
+
+
+    // --------------------------------------------------------
+    // 重定向回当前 Worker
+    // --------------------------------------------------------
+
+    if (location.startsWith(`${WORKER_ADDRESS}/`)) {
+      const redirectRequest = new Request(
+        location,
+        {
+          method:
+            request.method === "HEAD"
+              ? "HEAD"
+              : "GET",
+
+          // 继续使用已经过滤过的干净 Header
+          headers: new Headers(upstreamHeaders),
+
+          redirect: "manual",
+        }
+      );
+
+      return await handleRequest(redirectRequest);
+    }
+
+
+    // --------------------------------------------------------
+    // 外部重定向
+    //
+    // 不继承上一跳 request，
+    // 继续使用同一套干净 Header。
+    // --------------------------------------------------------
+
+    upstreamRequest = new Request(
+      location,
+      {
+        method:
+          request.method === "HEAD"
+            ? "HEAD"
+            : "GET",
+
+        headers: new Headers(upstreamHeaders),
+
+        redirect: "manual",
+      }
+    );
+
+    response = await fetch(upstreamRequest);
   }
-  response = new Response(response.body, response);
+
+
+  // ----------------------------------------------------------
+  // 清理响应 Header
+  // ----------------------------------------------------------
+
+  response = new Response(
+    response.body,
+    response
+  );
+
   response.headers.delete("set-cookie");
   response.headers.delete("Alt-Svc");
-  response.headers.set("Access-Control-Allow-Origin", origin);
-  response.headers.append("Vary", "Origin");
+
+  response.headers.set(
+    "Access-Control-Allow-Origin",
+    origin
+  );
+
+  response.headers.append(
+    "Vary",
+    "Origin"
+  );
+
   return response;
 }
 
+
+// ------------------------------------------------------------
 // src/handleOptions.js
+// ------------------------------------------------------------
+
 /**
  * Handles preflight CORS (OPTIONS) requests.
- * @param {Request} request - The incoming OPTIONS request.
- * @returns {Response} Response with CORS headers.
+ *
+ * @param {Request} request
+ * @returns {Response}
  */
 function handleOptions(request) {
   const corsHeaders = {
@@ -252,54 +516,74 @@ function handleOptions(request) {
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Access-Control-Max-Age": "86400",
   };
-  let headers = request.headers;
+
+  const headers = request.headers;
+
   if (
     headers.get("Origin") !== null &&
     headers.get("Access-Control-Request-Method") !== null
   ) {
-    let respHeaders = {
+    const respHeaders = {
       ...corsHeaders,
+
       "Access-Control-Allow-Headers":
-        request.headers.get("Access-Control-Request-Headers") || "",
+        headers.get(
+          "Access-Control-Request-Headers"
+        ) || "",
     };
+
     return new Response(null, {
       headers: respHeaders,
     });
-  } else {
-    return new Response(null, {
-      headers: {
-        Allow: "GET, HEAD, OPTIONS",
-      },
-    });
   }
+
+  return new Response(null, {
+    headers: {
+      Allow: "GET, HEAD, OPTIONS",
+    },
+  });
 }
 
+
+// ------------------------------------------------------------
 // src/handleRequest.js
+// ------------------------------------------------------------
+
 /**
- * Main request handler that routes based on HTTP method.
- * @param {Request} request - The incoming HTTP request.
- * @returns {Promise<Response>} A valid response.
+ * Main request handler.
+ *
+ * @param {Request} request
+ * @returns {Promise<Response>}
  */
 async function handleRequest(request) {
   if (request.method === "OPTIONS") {
     return handleOptions(request);
   }
+
   return await handleDownload(request);
 }
 
+
+// ------------------------------------------------------------
 // src/index.js
+// ------------------------------------------------------------
+
 /**
  * Cloudflare Worker entry point.
- * @param {Request} request - The incoming request.
- * @param {any} env - Environment bindings.
- * @param {ExecutionContext} ctx - Execution context.
- * @returns {Promise<Response>} Response from the handler.
+ *
+ * @param {Request} request
+ * @param {any} env
+ * @param {ExecutionContext} ctx
+ * @returns {Promise<Response>}
  */
 var src_default = {
   async fetch(request, env, ctx) {
-    // Initialize constants from environment variables
     initConstants(env);
+
     return await handleRequest(request);
   },
 };
-export { src_default as default };
+
+export {
+  src_default as default
+};
